@@ -116,7 +116,7 @@ def make_figure(v, sp, rs, gline, glabel, infl, rec, show_phase, show_rec, show_
     fig.update_layout(
         template="plotly_white", height=560, margin=dict(l=10, r=10, t=30, b=10), hovermode="closest",
         hoverlabel=dict(bgcolor="white", font_size=13),
-        xaxis=dict(rangeslider=dict(visible=True, thickness=0.06), range=[v.index[0], v.index[-1] + pd.offsets.MonthBegin(1)]),
+        xaxis=dict(rangeslider=dict(visible=True, thickness=0.06), range=[v.index[0], v.index[-1] + pd.offsets.MonthEnd(0)]),  # stop at the end of the last month with data
         yaxis=dict(title=glabel, range=[ymin, ymax], zeroline=True, zerolinecolor="#888"),
         yaxis2=dict(title="CPI YoY % (3m avg)", overlaying="y", side="right", showgrid=False,
                     title_font=dict(color="#b03060"), tickfont=dict(color="#b03060")),
