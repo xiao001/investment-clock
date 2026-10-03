@@ -2,7 +2,9 @@
 import io
 import urllib.request
 
-import altair as alt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
@@ -56,6 +58,32 @@ def build():
     return d, cf, infl, fred("USREC")
 
 
+def draw_chart(sp, rs, lines, picked):
+    """Phase-shaded growth/inflation chart with hatched NBER recessions (same style as the notebook chart)."""
+    fig, ax1 = plt.subplots(figsize=(13, 5.5))
+    for _, r in sp.iterrows():
+        ax1.axvspan(r["start"], r["end"], color=COLORS[r["phase"]], alpha=0.55, linewidth=0)
+    for _, r in rs.iterrows():
+        ax1.axvspan(r["start"], r["end"], facecolor="none", edgecolor="black", hatch="//", linewidth=0, zorder=2)
+    ax1.plot(lines["date"], lines["growth"], color="black", marker="o", markersize=3, linewidth=1.5, zorder=3)
+    ax1.axhline(0, color="black", linewidth=0.6, linestyle=":")
+    ax1.set_ylabel("Growth vs. trend (CFNAI, 3m avg)")
+    ax2 = ax1.twinx()
+    ax2.plot(lines["date"], lines["inflation"], color="#b03060", marker="o", markersize=3, linewidth=1.5, zorder=3)
+    ax2.set_ylabel("CPI YoY % (3m avg)", color="#b03060")
+    ax2.tick_params(axis="y", labelcolor="#b03060")
+    ax1.axvline(picked, color="black", linestyle="--", linewidth=1.6, zorder=4)
+    handles = [plt.Line2D([0], [0], color="black", lw=1.5, marker="o", markersize=3, label="Growth vs. trend (CFNAI)"),
+               plt.Line2D([0], [0], color="#b03060", lw=1.5, marker="o", markersize=3, label="CPI YoY % (smoothed)")]
+    handles += [plt.Rectangle((0, 0), 1, 1, color=COLORS[ph], alpha=0.55, label=ph) for ph in PHASES]
+    handles.append(plt.Rectangle((0, 0), 1, 1, facecolor="none", edgecolor="black", hatch="//", label="NBER recession"))
+    ax1.legend(handles=handles, loc="upper left", ncol=2, fontsize=9, framealpha=0.9)
+    ax1.set_title("Growth and inflation with phase shading (hatched = NBER recession)")
+    ax1.margins(x=0.02)
+    fig.tight_layout()
+    return fig
+
+
 st.title("Investment Clock: the four business cycle phases")
 st.caption("Growth direction x inflation direction, after Greetham (Merrill Lynch, 2004). "
            "Growth rising = at least 2 of 3 indicators (industrial production, CFNAI, unemployment) are higher than 3 months ago. "
@@ -90,27 +118,9 @@ months = list(pd.date_range(t0, t1, freq="MS"))
 picked = st.select_slider("Check a month: which phase was it?", options=months, value=months[-1],
                           format_func=lambda t: f"{t:%Y-%m}")
 
-shade = alt.Chart(sp).mark_rect(opacity=0.55).encode(
-    x="start:T", x2="end:T",
-    color=alt.Color("phase:N", title="Phase", scale=alt.Scale(domain=PHASES, range=[COLORS[p] for p in PHASES])),
-    tooltip=["phase:N", "start:T"])
-growth = alt.Chart(lines).mark_line(color="black", point=alt.OverlayMarkDef(size=14)).encode(
-    x=alt.X("date:T", title=None), y=alt.Y("growth:Q", title="Growth vs. trend (CFNAI, 3m avg)"),
-    tooltip=["date:T", alt.Tooltip("growth:Q", format=".2f")])
-inflation = alt.Chart(lines).mark_line(color="#b03060", point=alt.OverlayMarkDef(size=14)).encode(
-    x="date:T", y=alt.Y("inflation:Q", title="CPI YoY % (3m avg)", axis=alt.Axis(orient="right", titleColor="#b03060")),
-    tooltip=["date:T", alt.Tooltip("inflation:Q", format=".2f")])
-marker = alt.Chart(pd.DataFrame({"date": [picked]})).mark_rule(color="black", strokeDash=[5, 4], size=2).encode(x="date:T")
-layers = [shade, growth, inflation, marker]
-if len(rs):
-    rs_plot = rs.assign(label="NBER recession")
-    rec_band = alt.Chart(rs_plot).mark_rect(opacity=0.35).encode(
-        x="start:T", x2="end:T",
-        color=alt.Color("label:N", title=None, scale=alt.Scale(domain=["NBER recession"], range=["#222222"]),
-                        legend=alt.Legend(orient="top-right")))
-    layers.insert(1, rec_band)
-st.altair_chart(alt.layer(*layers).resolve_scale(y="independent", color="independent").properties(height=460),
-                width="stretch")
+fig = draw_chart(sp, rs, lines, picked)
+st.pyplot(fig)
+plt.close(fig)
 
 arrow = lambda b: "rising" if b else "falling"
 c1, c2, c3, c4 = st.columns(4)
@@ -130,6 +140,6 @@ else:
     c3.metric("Inflation", "-")
     st.caption("No phase for this month: at least one input series has not been published (or was never released).")
 st.caption(f"Latest month with data: {d.index[-1]:%Y-%m}, phase {d.iloc[-1]['phase']}.")
-st.caption("Black line: growth vs. trend. Pink line: inflation. Dark grey bands mark NBER recessions. "
+st.caption("Black line: growth vs. trend. Pink line: inflation. Hatched areas mark NBER recessions. "
            "Phases flip often when growth sits near trend, so read each label as a direction, not a long regime. "
            "Uses revised FRED data and no publication lag. Educational research, not investment advice.")
