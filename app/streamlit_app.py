@@ -70,14 +70,15 @@ except Exception as e:
 lo, hi = d.index[0].date(), d.index[-1].date()
 default_start = max(lo, (d.index[-1] - pd.DateOffset(years=5)).date())
 start, end = st.slider("Date range", min_value=lo, max_value=hi, value=(default_start, hi), format="YYYY-MM")
-t0, t1 = pd.Timestamp(start), pd.Timestamp(end)
+t0, t1 = pd.Timestamp(start).to_period("M").to_timestamp(), pd.Timestamp(end).to_period("M").to_timestamp()
 
 v = d[(d.index >= t0) & (d.index <= t1)]
 if len(v) < 3:
     st.warning("Pick a longer date range.")
     st.stop()
 
-seg = (v["phase"] != v["phase"].shift()).cumsum()
+gap = v.index.to_series().diff() > pd.Timedelta(days=40)   # a missing month breaks the segment
+seg = ((v["phase"] != v["phase"].shift()) | gap.values).cumsum()
 sp = v.reset_index(names="date").groupby(seg.values).agg(start=("date", "first"), end=("date", "last"), phase=("phase", "first"))
 sp["end"] = sp["end"] + pd.offsets.MonthBegin(1)
 rs = spans(rec == 1)
@@ -85,7 +86,7 @@ rs = rs[(rs["end"] >= t0) & (rs["start"] <= t1)]
 lines = pd.DataFrame({"growth": cf, "inflation": infl})
 lines = lines[(lines.index >= t0) & (lines.index <= t1)].rename_axis("date").reset_index()
 
-months = [m for m in v.index]
+months = list(pd.date_range(t0, t1, freq="MS"))
 picked = st.select_slider("Check a month: which phase was it?", options=months, value=months[-1],
                           format_func=lambda t: f"{t:%Y-%m}")
 
@@ -105,15 +106,21 @@ if len(rs):
     layers.insert(1, alt.Chart(rs).mark_rect(color="black", opacity=0.9, height=8).encode(x="start:T", x2="end:T"))
 st.altair_chart(alt.layer(*layers).resolve_scale(y="independent").properties(height=460), width="stretch")
 
-row = v.loc[picked]
 arrow = lambda b: "rising" if b else "falling"
 c1, c2, c3 = st.columns(3)
-c1.metric(f"Phase in {picked:%Y-%m}", row["phase"])
-c2.metric("Growth", arrow(row["g_up"]), help="At least 2 of 3 indicators higher than 3 months ago")
-c3.metric("Inflation", arrow(row["i_up"]), help="Smoothed CPI YoY higher than 3 months ago")
-st.caption(f"Growth votes: industrial production {arrow(row['ip_up'])}, CFNAI {arrow(row['cf_up'])}, "
-           f"unemployment (sign flipped) {arrow(row['un_up'])} ({int(row['votes'])} of 3 rising). "
-           f"Latest month available: {d.index[-1]:%Y-%m}, phase {d.iloc[-1]['phase']}.")
+if picked in v.index:
+    row = v.loc[picked]
+    c1.metric(f"Phase in {picked:%Y-%m}", row["phase"])
+    c2.metric("Growth", arrow(row["g_up"]), help="At least 2 of 3 indicators higher than 3 months ago")
+    c3.metric("Inflation", arrow(row["i_up"]), help="Smoothed CPI YoY higher than 3 months ago")
+    st.caption(f"Growth votes: industrial production {arrow(row['ip_up'])}, CFNAI {arrow(row['cf_up'])}, "
+               f"unemployment (sign flipped) {arrow(row['un_up'])} ({int(row['votes'])} of 3 rising).")
+else:
+    c1.metric(f"Phase in {picked:%Y-%m}", "No data")
+    c2.metric("Growth", "-")
+    c3.metric("Inflation", "-")
+    st.caption("No phase for this month: at least one input series has not been published (or was never released).")
+st.caption(f"Latest month with data: {d.index[-1]:%Y-%m}, phase {d.iloc[-1]['phase']}.")
 st.caption("Black line: growth vs. trend. Pink line: inflation. A black bar along the bottom marks NBER recession months. "
            "Phases flip often when growth sits near trend, so read each label as a direction, not a long regime. "
            "Uses revised FRED data and no publication lag. Educational research, not investment advice.")
