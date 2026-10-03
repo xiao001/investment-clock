@@ -84,14 +84,15 @@ def make_figure(v, sp, rs, gline, glabel, infl, rec, show_phase, show_rec, show_
     pad = (hi - lo) * 0.08 or 0.1
     ymin, ymax = lo - pad, hi + pad
 
+    H = pd.Timedelta(days=15)  # centre each band on its month so a month and its dot line up
     fig = go.Figure()
     if show_phase:
         for _, r in sp.iterrows():
-            fig.add_vrect(x0=r["start"], x1=r["end"], fillcolor=RGBA[r["phase"]], line_width=0, layer="below")
+            fig.add_vrect(x0=r["start"] - H, x1=r["end"] - H, fillcolor=RGBA[r["phase"]], line_width=0, layer="below")
     if show_rec:
         for i, (_, r) in enumerate(rs.iterrows()):
             fig.add_trace(go.Scatter(
-                x=[r["start"], r["start"], r["end"], r["end"], r["start"]], y=[ymin, ymax, ymax, ymin, ymin],
+                x=[r["start"] - H, r["start"] - H, r["end"] - H, r["end"] - H, r["start"] - H], y=[ymin, ymax, ymax, ymin, ymin],
                 mode="lines", fill="toself", line=dict(width=0), hoverinfo="skip",
                 fillpattern=dict(shape="/", fgcolor="black", bgcolor="rgba(0,0,0,0)", size=7, solidity=0.18),
                 name="NBER recession", legendgroup="rec", showlegend=(i == 0)))
@@ -114,7 +115,7 @@ def make_figure(v, sp, rs, gline, glabel, infl, rec, show_phase, show_rec, show_
     fig.update_layout(
         template="plotly_white", height=560, margin=dict(l=10, r=10, t=30, b=10), hovermode="closest",
         hoverlabel=dict(bgcolor="white", font_size=13),
-        xaxis=dict(rangeslider=dict(visible=True, thickness=0.06), range=[v.index[0], v.index[-1] + pd.offsets.MonthEnd(0)]),  # stop at the end of the last month with data
+        xaxis=dict(rangeslider=dict(visible=True, thickness=0.06), range=[v.index[0] - H, v.index[-1] + H]),  # stop at the end of the last month with data
         yaxis=dict(title=glabel, range=[ymin, ymax], zeroline=True, zerolinecolor="#888"),
         yaxis2=dict(title="CPI YoY % (3m avg)", overlaying="y", side="right", showgrid=False,
                     title_font=dict(color="#b03060"), tickfont=dict(color="#b03060")),
