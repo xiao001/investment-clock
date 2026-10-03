@@ -111,8 +111,6 @@ def make_figure(v, sp, rs, gline, glabel, infl, rec, show_phase, show_rec, show_
     for p in PHASES:
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=p, hoverinfo="skip",
                                  marker=dict(symbol="square", size=12, color=RGBA[p].replace("0.45", "0.8"))))
-    if picked is not None:
-        fig.add_vline(x=picked, line_dash="dash", line_color="black", line_width=2)
     fig.update_layout(
         template="plotly_white", height=560, margin=dict(l=10, r=10, t=30, b=10), hovermode="closest",
         hoverlabel=dict(bgcolor="white", font_size=13),
