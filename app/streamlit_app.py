@@ -103,11 +103,20 @@ inflation = alt.Chart(lines).mark_line(color="#b03060", point=alt.OverlayMarkDef
 marker = alt.Chart(pd.DataFrame({"date": [picked]})).mark_rule(color="black", strokeDash=[5, 4], size=2).encode(x="date:T")
 layers = [shade, growth, inflation, marker]
 if len(rs):
-    layers.insert(1, alt.Chart(rs).mark_rect(color="black", opacity=0.9, height=8).encode(x="start:T", x2="end:T"))
-st.altair_chart(alt.layer(*layers).resolve_scale(y="independent").properties(height=460), width="stretch")
+    rs_plot = rs.assign(label="NBER recession")
+    rec_band = alt.Chart(rs_plot).mark_rect(opacity=0.35).encode(
+        x="start:T", x2="end:T",
+        color=alt.Color("label:N", title=None, scale=alt.Scale(domain=["NBER recession"], range=["#222222"]),
+                        legend=alt.Legend(orient="top-right")))
+    layers.insert(1, rec_band)
+st.altair_chart(alt.layer(*layers).resolve_scale(y="independent", color="independent").properties(height=460),
+                width="stretch")
 
 arrow = lambda b: "rising" if b else "falling"
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
+in_rec = bool(rec.reindex([picked]).iloc[0] == 1) if picked in rec.index else None
+c4.metric("NBER recession", "Yes" if in_rec else ("No" if in_rec is not None else "Not dated yet"),
+          help="NBER's official monthly recession indicator (FRED USREC)")
 if picked in v.index:
     row = v.loc[picked]
     c1.metric(f"Phase in {picked:%Y-%m}", row["phase"])
@@ -121,6 +130,6 @@ else:
     c3.metric("Inflation", "-")
     st.caption("No phase for this month: at least one input series has not been published (or was never released).")
 st.caption(f"Latest month with data: {d.index[-1]:%Y-%m}, phase {d.iloc[-1]['phase']}.")
-st.caption("Black line: growth vs. trend. Pink line: inflation. A black bar along the bottom marks NBER recession months. "
+st.caption("Black line: growth vs. trend. Pink line: inflation. Dark grey bands mark NBER recessions. "
            "Phases flip often when growth sits near trend, so read each label as a direction, not a long regime. "
            "Uses revised FRED data and no publication lag. Educational research, not investment advice.")
