@@ -139,6 +139,10 @@ with st.sidebar:
     show_phase = st.checkbox("Phase colours", True)
     show_rec = st.checkbox("NBER recessions (hatched)", True)
     show_lines = st.checkbox("Growth and inflation lines", True)
+    st.header("Data")
+    hide_latest = st.checkbox("Hide the latest month (provisional)", True,
+                              help="The newest CFNAI and CPI readings are the ones most likely to be revised, "
+                                   "and the newest month is never confirmed by later data. Untick to show it.")
 
 try:
     d, gline, glabel, infl, rec = build(source, smooth, win)
@@ -146,8 +150,11 @@ except Exception as e:
     st.error(f"Live data unavailable: {e}")
     st.stop()
 
+if hide_latest and len(d) > 12:
+    d = d.iloc[:-1]
 last = d.index[-1]
 presets = {
+    "Last 1 year": (last - pd.DateOffset(years=1), last),
     "Last 2 years": (last - pd.DateOffset(years=2), last),
     "Last 5 years": (last - pd.DateOffset(years=5), last),
     "Last 10 years": (last - pd.DateOffset(years=10), last),
@@ -156,7 +163,7 @@ presets = {
     "2020 COVID shock": (pd.Timestamp("2019-01-01"), pd.Timestamp("2021-12-01")),
     "Custom": None,
 }
-choice = st.radio("Window", list(presets), index=1, horizontal=True)
+choice = st.radio("Window", list(presets), index=2, horizontal=True)
 if presets[choice] is None:
     lo, hi = d.index[0].date(), last.date()
     s0, s1 = st.slider("Custom date range", min_value=lo, max_value=hi, value=(lo, hi), format="YYYY-MM")
