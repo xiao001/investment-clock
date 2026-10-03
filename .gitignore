@@ -1,0 +1,7 @@
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+# copyrighted source PDFs and extracted text: keep out of a public repo
+docs/
+# generated charts are not needed by the app
+results/plots/
