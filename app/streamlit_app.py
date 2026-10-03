@@ -138,7 +138,7 @@ with st.sidebar:
     show_rec = st.checkbox("NBER recessions (hatched)", True)
     show_lines = st.checkbox("Growth and inflation lines", True)
     st.header("Data")
-    hide_latest = st.checkbox("Hide the latest month (provisional)", True,
+    hide_latest = st.checkbox("Hide the latest month (provisional)", False,
                               help="The newest CFNAI and CPI readings are the ones most likely to be revised, "
                                    "and the newest month is never confirmed by later data. Untick to show it.")
 
