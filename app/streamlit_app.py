@@ -1,4 +1,6 @@
 """Investment Clock dashboard. Reads the precomputed CSVs in results/model_outputs."""
+import io
+import urllib.request
 from pathlib import Path
 
 import altair as alt
@@ -35,6 +37,50 @@ def geo_annual(x):
     return ((1 + x).prod() ** (12 / len(x)) - 1) * 100
 
 
+# ---- live charts: the app fetches FRED itself and computes everything here ----
+@st.cache_data(ttl=86400, show_spinner="Fetching FRED data...")
+def fred_live(series):
+    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}&cosd=1960-01-01"
+    last = None
+    for _ in range(3):
+        try:
+            raw = urllib.request.urlopen(url, timeout=25).read().decode()
+            d = pd.read_csv(io.StringIO(raw), index_col=0, parse_dates=True)
+            return pd.to_numeric(d.iloc[:, 0], errors="coerce").dropna().rename(series)
+        except Exception as e:  # FRED is occasionally slow
+            last = e
+    raise RuntimeError(f"Could not fetch {series} from FRED: {last}")
+
+
+def spans(flag):
+    """contiguous (start, end) date spans where flag is True; flag has a month-start DatetimeIndex"""
+    out, start, prev = [], None, None
+    for t, v in flag.items():
+        if v and start is None:
+            start = t
+        elif not v and start is not None:
+            out.append((start, t)); start = None
+        prev = t
+    if start is not None:
+        out.append((start, prev + pd.offsets.MonthBegin(1)))
+    return pd.DataFrame(out, columns=["start", "end"])
+
+
+def live_phases():
+    ip = (fred_live("INDPRO").pct_change(12) * 100).rolling(3).mean()
+    cf = fred_live("CFNAI").rolling(3).mean()
+    un = -fred_live("UNRATE").rolling(3).mean()
+    infl = (fred_live("CPIAUCSL").pct_change(12) * 100).rolling(3).mean()
+    up = lambda x: ((x - x.shift(3)) > 0).where((x - x.shift(3)).notna())
+    votes = pd.concat([up(ip), up(cf), up(un)], axis=1).dropna().astype(int).sum(axis=1)
+    g_up = votes >= 2
+    i_up = up(infl).dropna().astype(bool)
+    d = pd.DataFrame({"g_up": g_up, "i_up": i_up}).dropna()
+    names = {(True, False): "Recovery", (True, True): "Overheat", (False, True): "Stagflation", (False, False): "Reflation"}
+    d["phase"] = [names[(bool(g), bool(i))] for g, i in zip(d.g_up, d.i_up)]
+    return d, cf, infl
+
+
 st.title("Investment Clock")
 st.caption("Growth direction x inflation direction gives four phases (Greetham, Merrill Lynch, 2004). "
            "Signals are lagged 2 months. Returns are real, monthly, 1973-04 to 2026-08.")
@@ -53,7 +99,8 @@ if len(df) < 12:
     st.warning("Pick a longer date range.")
     st.stop()
 
-tab1, tab2, tab3, tab4 = st.tabs(["Current phase", "Assets by phase", "Phase timeline", "NBER recessions"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Current phase", "Assets by phase", "Phase timeline", "NBER recessions",
+                                              "Indicators (live)", "Cycle chart (live)"])
 
 with tab1:
     latest = df_all.iloc[-1]
@@ -119,6 +166,67 @@ with tab4:
     c2.metric("Precision", f"{tp / max(tp + fp, 1) * 100:.1f}%", help="Share of flagged months that were recessions")
     c3.metric("Recession months", int(act.sum()))
     st.dataframe(pd.crosstab(n["phase"], n["nber_recession"]).reindex(PHASES), width="stretch")
+
+with tab5:
+    st.caption("Built live from FRED in this app. Grey bars are NBER recessions.")
+    try:
+        rec = fred_live("USREC")
+        rs = spans(rec == 1)
+        t0, t1 = pd.Timestamp(start), pd.Timestamp(end)
+        rs = rs[(rs["end"] >= t0) & (rs["start"] <= t1)]
+        meta = {"INDPRO": "Industrial production (index)", "CFNAI": "Chicago Fed National Activity Index",
+                "UNRATE": "Unemployment rate (%)", "CPIAUCSL": "CPI, all urban consumers (index)"}
+        for code_, title in meta.items():
+            sr = fred_live(code_)
+            sr = sr[(sr.index >= t0) & (sr.index <= t1)].rename("value").rename_axis("date").reset_index()
+            bars = alt.Chart(rs).mark_rect(color="grey", opacity=0.3).encode(x="start:T", x2="end:T")
+            line = alt.Chart(sr).mark_line(color="#1f5fa8").encode(
+                x=alt.X("date:T", title=None), y=alt.Y("value:Q", title=None, scale=alt.Scale(zero=False)),
+                tooltip=["date:T", alt.Tooltip("value:Q", format=".2f")])
+            st.markdown(f"**{code_}**: {title}")
+            st.altair_chart((bars + line).properties(height=190), width="stretch")
+    except Exception as e:
+        st.error(f"Live data unavailable: {e}")
+
+with tab6:
+    st.caption("Growth vs. trend (CFNAI) and CPI inflation. Background = phase from a 2-of-3 growth vote "
+               "(INDPRO, CFNAI, UNRATE) plus CPI direction. No publication lag is applied here.")
+    try:
+        d, cf, infl = live_phases()
+        t0, t1 = pd.Timestamp(start), pd.Timestamp(end)
+        d = d[(d.index >= t0) & (d.index <= t1)]
+        if len(d) < 3:
+            st.warning("Pick a longer date range.")
+        else:
+            seg = (d["phase"] != d["phase"].shift()).cumsum()
+            sp = d.reset_index(names="date").groupby(seg.values).agg(
+                start=("date", "first"), end=("date", "last"), phase=("phase", "first"))
+            sp["end"] = sp["end"] + pd.offsets.MonthBegin(1)
+            rec = fred_live("USREC")
+            rs = spans(rec == 1)
+            rs = rs[(rs["end"] >= t0) & (rs["start"] <= t1)]
+            lines = pd.DataFrame({"CFNAI (3m avg, left axis)": cf, "CPI YoY % (3m avg, right axis)": infl})
+            lines = lines[(lines.index >= t0) & (lines.index <= t1)].rename_axis("date").reset_index()
+            shade = alt.Chart(sp).mark_rect(opacity=0.55).encode(
+                x="start:T", x2="end:T",
+                color=alt.Color("phase:N", scale=alt.Scale(domain=PHASES, range=[COLORS[p] for p in PHASES])),
+                tooltip=["phase:N", "start:T"])
+            rec_bar = alt.Chart(rs).mark_rect(color="black", opacity=0.9, height=8, yOffset=0).encode(x="start:T", x2="end:T")
+            lg = alt.Chart(lines).mark_line(color="black", point=alt.OverlayMarkDef(size=14)).encode(
+                x=alt.X("date:T", title=None), y=alt.Y("CFNAI (3m avg, left axis):Q", title="CFNAI vs. trend"),
+                tooltip=["date:T", alt.Tooltip("CFNAI (3m avg, left axis):Q", format=".2f")])
+            li = alt.Chart(lines).mark_line(color="#b03060", point=alt.OverlayMarkDef(size=14)).encode(
+                x="date:T", y=alt.Y("CPI YoY % (3m avg, right axis):Q", title="CPI YoY %",
+                                    axis=alt.Axis(orient="right", titleColor="#b03060")),
+                tooltip=["date:T", alt.Tooltip("CPI YoY % (3m avg, right axis):Q", format=".2f")])
+            st.altair_chart(alt.layer(shade, lg, li).resolve_scale(y="independent").properties(height=420), width="stretch")
+            st.caption("Black bar along the bottom edge of the shading marks NBER recession months." if len(rs) else
+                       "No NBER recession in this window.")
+            cur = d.iloc[-1]
+            st.write(f"Latest month in view ({d.index[-1]:%Y-%m}): **{cur['phase']}**. "
+                     f"Phases flip often when growth sits near trend, so read the label as a direction, not a regime.")
+    except Exception as e:
+        st.error(f"Live data unavailable: {e}")
 
 st.divider()
 st.caption("Based on revised FRED data with a flat 2-month lag, not real-time vintages. Educational research only, not investment advice.")
