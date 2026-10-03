@@ -47,14 +47,14 @@ def spans(flag):
 
 
 @st.cache_data(ttl=86400)
-def build(source, smooth, win):
+def build(source, smooth, win, i_smooth, i_win):
     ip = (fred("INDPRO").pct_change(12) * 100).rolling(smooth).mean()
     cf = fred("CFNAI").rolling(smooth).mean()
     un = -fred("UNRATE").rolling(smooth).mean()
-    infl = (fred("CPIAUCSL").pct_change(12) * 100).rolling(smooth).mean()
+    infl = (fred("CPIAUCSL").pct_change(12) * 100).rolling(i_smooth).mean()
 
-    def up(x):
-        c = x - x.shift(win)
+    def up(x, w=win):
+        c = x - x.shift(w)
         return (c > 0).where(c.notna())
 
     ups = pd.concat({"ip_up": up(ip), "cf_up": up(cf), "un_up": up(un)}, axis=1).dropna().astype(bool)
@@ -67,7 +67,7 @@ def build(source, smooth, win):
         g, gline, glabel = ups["cf_up"], cf, "Growth vs. trend (CFNAI)"
     else:
         g, gline, glabel = ups["un_up"], un, "Unemployment, sign flipped (%)"
-    d = pd.DataFrame({"g_up": g.astype(bool), "votes": votes, "i_up": up(infl).dropna().astype(bool)}).join(ups).dropna()
+    d = pd.DataFrame({"g_up": g.astype(bool), "votes": votes, "i_up": up(infl, i_win).dropna().astype(bool)}).join(ups).dropna()
     d["g_up"], d["i_up"] = d["g_up"].astype(bool), d["i_up"].astype(bool)
     d["phase"] = [NAMES[(bool(a), bool(b))] for a, b in zip(d.g_up, d.i_up)]
     return d, gline, glabel, infl, fred("USREC")
@@ -133,7 +133,10 @@ with st.sidebar:
     source = st.selectbox("Growth indicator", SOURCES,
                           help="The composite needs at least 2 of 3 indicators to be rising. The others use one series.")
     smooth = st.slider("Smoothing (months)", 1, 6, 3, help="Moving average applied to each series before testing direction.")
-    win = st.slider("Direction window (months)", 1, 6, 3, help="Rising means higher than this many months ago.")
+    win = st.slider("Direction window (months)", 1, 6, 3, help="Growth is rising if higher than this many months ago.")
+    st.caption("Inflation can use its own rule. Smoothing 1 and window 1 means: is raw CPI YoY higher than last month?")
+    i_smooth = st.slider("Inflation smoothing (months)", 1, 6, 3)
+    i_win = st.slider("Inflation direction window (months)", 1, 6, 3)
     st.header("Show")
     show_phase = st.checkbox("Phase colours", True)
     show_rec = st.checkbox("NBER recessions (hatched)", True)
@@ -144,7 +147,7 @@ with st.sidebar:
                                    "and the newest month is never confirmed by later data. Untick to show it.")
 
 try:
-    d, gline, glabel, infl, rec = build(source, smooth, win)
+    d, gline, glabel, infl, rec = build(source, smooth, win, i_smooth, i_win)
 except Exception as e:
     st.error(f"Live data unavailable: {e}")
     st.stop()
